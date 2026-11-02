@@ -149,7 +149,7 @@ func Compress(buf []byte, w io.Writer, matcher Matcher) {
 		if l > 2 {
 
 			minoffs1 := max(1+fileoffs-4096, 0)
-			l1, o1 := matcher.findMatch(fileoffs, buf[minoffs1:fileoffs+1], buf[fileoffs+1:])
+			l1, o1 := matcher.findMatch(fileoffs+1, buf[minoffs1:fileoffs+1], buf[fileoffs+1:])
 
 			if l1 > l {
 				// found a better match if we pretend this char didn't match
