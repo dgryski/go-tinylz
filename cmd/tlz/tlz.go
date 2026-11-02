@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"io/ioutil"
 	"log"
@@ -14,22 +13,11 @@ import (
 func main() {
 	var optDecompress = flag.Bool("d", false, "decompress")
 	var optCpuProfile = flag.String("cpuprofile", "", "profile")
-	var optFast = flag.Bool("fast", false, "compress faster")
-	var optBest = flag.Bool("best", false, "compress better")
+	var optTable = flag.Int("table", 1024, "compression hash table entries, a power of two")
 	flag.Parse()
 
-	if *optFast && *optBest {
-		log.Fatal("only one of -fast / -best allowed")
-	}
-
-	// default
-	var matcher tinylz.Matcher = &tinylz.CompressBest{}
-
-	switch {
-	case *optFast:
-		matcher = &tinylz.CompressFast{}
-	case *optBest:
-		matcher = &tinylz.CompressBest{}
+	if *optTable < 0 {
+		log.Fatal("-table must not be negative")
 	}
 
 	if *optCpuProfile != "" {
@@ -47,12 +35,22 @@ func main() {
 	}
 
 	if *optDecompress {
-		dst := make([]byte, tinylz.DecompressedLength(buf))
-		tinylz.Decompress(buf, dst[:0])
-		os.Stdout.Write(dst)
+		n, derr := tinylz.DecodedLen(buf)
+		if derr != nil {
+			log.Fatal(derr)
+		}
+		dst := make([]byte, n)
+		n, derr = tinylz.Decompress(dst, buf)
+		if derr != nil {
+			log.Fatal(derr)
+		}
+		os.Stdout.Write(dst[:n])
 	} else {
-		stdout := bufio.NewWriter(os.Stdout)
-		tinylz.Compress(buf, stdout, matcher)
-		stdout.Flush()
+		dst := make([]byte, tinylz.CompressBound(len(buf)))
+		n, cerr := tinylz.Compress(dst, buf, make([]uint32, *optTable))
+		if cerr != nil {
+			log.Fatal(cerr)
+		}
+		os.Stdout.Write(dst[:n])
 	}
 }

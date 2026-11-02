@@ -1,68 +1,120 @@
 package tinylz
 
-import (
-	"errors"
+// Error is the type of the errors returned by this package.
+type Error int
+
+const (
+	ErrCorrupt Error = iota + 1
+	ErrShortBuffer
+	ErrTooLarge
+	ErrBadTable
 )
 
-func DecompressedLength(buf []byte) uint32 {
-	return uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16 | uint32(buf[3])<<24
+func (e Error) Error() string {
+	switch e {
+	case ErrCorrupt:
+		return "tinylz: corrupt stream"
+	case ErrShortBuffer:
+		return "tinylz: short buffer"
+	case ErrTooLarge:
+		return "tinylz: input too large"
+	case ErrBadTable:
+		return "tinylz: table length must be a power of two"
+	}
+	return "tinylz: unknown error"
 }
 
-var errCorrupt = errors.New("tinylz: corrupt stream")
-
-func Decompress(src, dst []byte) ([]byte, error) {
-	n := len(src)
-
-	if n == 0 {
-		return nil, nil
+// DecodedLen returns the number of bytes src decompresses to.
+func DecodedLen(src []byte) (int, error) {
+	if len(src) == 0 {
+		return 0, nil
 	}
 
-	if n < 4 {
-		return nil, errCorrupt
+	if len(src) < 4 {
+		return 0, ErrCorrupt
 	}
 
-	length := DecompressedLength(src)
-	fileoffs := 4
+	n := int(uint32(src[0]) | uint32(src[1])<<8 | uint32(src[2])<<16 | uint32(src[3])<<24)
+	if n < 0 {
+		return 0, ErrTooLarge
+	}
 
-	var ctrlbits uint8
+	return n, nil
+}
 
-	for fileoffs < n {
-		ctrlbits = src[fileoffs]
-		fileoffs++
+// Decompress writes the decompressed src to dst and returns the bytes written.
+// dst must hold DecodedLen(src) bytes and must not overlap src.
+func Decompress(dst, src []byte) (int, error) {
+	n, err := DecodedLen(src)
+	if err != nil {
+		return 0, err
+	}
 
-		for ctrln := 0; ctrln < 8; ctrln++ {
+	if n > len(dst) {
+		return 0, ErrShortBuffer
+	}
+
+	dst = dst[:n]
+
+	s, d := 4, 0
+
+	for d < n {
+		if s >= len(src) {
+			return 0, ErrCorrupt
+		}
+
+		ctrlbits := src[s]
+		s++
+
+		for ctrln := 0; ctrln < 8 && d < n; ctrln++ {
 			if ctrlbits&0x80 == 0x80 {
-				if fileoffs+2 > len(src) {
-					return nil, errCorrupt
+				if s+2 > len(src) {
+					return 0, ErrCorrupt
 				}
-				l := (int(src[fileoffs]&0xf0) >> 4) | 0
-				o := (int(src[fileoffs]&0x0f) << 8) | int(src[fileoffs+1])
+
+				l := int(src[s] >> 4)
+				o := int(src[s]&0x0f)<<8 | int(src[s+1])
+				s += 2
+
 				if l == 0x0f {
-					if fileoffs+3 > len(src) {
-						return nil, errCorrupt
+					if s >= len(src) {
+						return 0, ErrCorrupt
 					}
-					l += int(src[fileoffs+2])
-					fileoffs++
+					l += int(src[s])
+					s++
 				}
-				minoffs := max(len(dst)-4096, 0)
-				if minoffs+o >= len(dst) || minoffs+o+l > len(dst) {
-					return nil, errCorrupt
+
+				p := o
+				if d > window {
+					p += d - window
 				}
-				dst = append(dst, dst[minoffs+o:minoffs+o+l]...)
-				fileoffs += 2
+
+				if p >= d || l > n-d {
+					return 0, ErrCorrupt
+				}
+
+				if p+l <= d {
+					copy(dst[d:d+l], dst[p:p+l])
+				} else {
+					// overlapping match, copy one byte at a time
+					for j := 0; j < l; j++ {
+						dst[d+j] = dst[p+j]
+					}
+				}
+				d += l
 			} else {
-				if fileoffs >= len(src) {
-					return nil, errCorrupt
+				if s >= len(src) {
+					return 0, ErrCorrupt
 				}
-				dst = append(dst, src[fileoffs])
-				fileoffs++
+
+				dst[d] = src[s]
+				s++
+				d++
 			}
+
 			ctrlbits <<= 1
-			if uint32(len(dst)) >= length {
-				break
-			}
 		}
 	}
 
-	return dst, nil
+	return n, nil
 }
