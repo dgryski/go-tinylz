@@ -67,6 +67,32 @@ func checkMatch(fileoffs, offs int, buf, s []byte) (int, int) {
 	return length, o
 }
 
+func findBest(buf, s []uint8) (length int, offs int) {
+	if len(s) == 0 {
+		return 0, 0
+	}
+
+	s0 := s[0]
+
+	for i, bc := range buf {
+		if bc != s0 {
+			continue
+		}
+
+		j := 1
+		for j < maxMatchLength && j < len(s) && i+j < len(buf) && buf[i+j] == s[j] {
+			j++
+		}
+
+		if j > length {
+			length = j
+			offs = i
+		}
+	}
+
+	return length, offs
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -159,6 +185,14 @@ func Compress(dst, src []byte, table []uint32) (int, error) {
 
 	return compress(dst, src, func(fileoffs int, buf, s []byte) (int, int) {
 		return findMatch(table, fileoffs, buf, s)
+	})
+}
+
+// CompressBest searches the whole window for the longest match at every position.
+// It takes no table and is much slower than Compress.
+func CompressBest(dst, src []byte) (int, error) {
+	return compress(dst, src, func(_ int, buf, s []byte) (int, int) {
+		return findBest(buf, s)
 	})
 }
 

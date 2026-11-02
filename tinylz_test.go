@@ -41,7 +41,15 @@ func roundtrip(b []byte) error {
 
 	c := make([]byte, CompressBound(len(b)))
 
-	n, err := Compress(c, b, make([]uint32, 1024))
+	n, err := CompressBest(c, b)
+	if err != nil {
+		return err
+	}
+	if err := check("best", c[:n]); err != nil {
+		return err
+	}
+
+	n, err = Compress(c, b, make([]uint32, 1024))
 	if err != nil {
 		return err
 	}
@@ -244,5 +252,40 @@ func TestErrorString(t *testing.T) {
 	var err error = ErrCorrupt
 	if err.Error() != "tinylz: corrupt stream" {
 		t.Fatal(err)
+	}
+}
+
+func TestCompressBest(t *testing.T) {
+	rng := rand.New(rand.NewSource(6))
+	for i := 0; i < 50; i++ {
+		b := randomInput(rng, rng.Intn(10000)+1)
+
+		fast := make([]byte, CompressBound(len(b)))
+		fn, _ := Compress(fast, b, make([]uint32, 1<<16))
+
+		best := make([]byte, CompressBound(len(b)))
+		bn, err := CompressBest(best, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if bn > fn {
+			t.Errorf("case %d: best %d bytes, fast %d bytes", i, bn, fn)
+		}
+
+		d := make([]byte, len(b))
+		if n, err := Decompress(d, best[:bn]); err != nil || n != len(b) || !bytes.Equal(d, b) {
+			t.Fatalf("case %d: mismatch, err=%v", i, err)
+		}
+
+		if bn > 1 {
+			if _, err := CompressBest(make([]byte, bn-1), b); err != ErrShortBuffer {
+				t.Fatalf("case %d: short dst: got %v", i, err)
+			}
+		}
+	}
+
+	if n, err := CompressBest(nil, nil); n != 0 || err != nil {
+		t.Fatalf("empty: %d %v", n, err)
 	}
 }

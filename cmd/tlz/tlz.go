@@ -14,6 +14,7 @@ func main() {
 	var optDecompress = flag.Bool("d", false, "decompress")
 	var optCpuProfile = flag.String("cpuprofile", "", "profile")
 	var optTable = flag.Int("table", 1024, "compression hash table entries, a power of two")
+	var optBest = flag.Bool("best", false, "compress better but slower, ignores -table")
 	flag.Parse()
 
 	if *optTable < 0 {
@@ -47,7 +48,13 @@ func main() {
 		os.Stdout.Write(dst[:n])
 	} else {
 		dst := make([]byte, tinylz.CompressBound(len(buf)))
-		n, cerr := tinylz.Compress(dst, buf, make([]uint32, *optTable))
+		var n int
+		var cerr error
+		if *optBest {
+			n, cerr = tinylz.CompressBest(dst, buf)
+		} else {
+			n, cerr = tinylz.Compress(dst, buf, make([]uint32, *optTable))
+		}
 		if cerr != nil {
 			log.Fatal(cerr)
 		}
