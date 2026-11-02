@@ -116,26 +116,71 @@ func min(a, b int) int {
 	return b
 }
 
+type encoder struct {
+	w     io.Writer
+	data  []byte
+	ctrl  uint8
+	ctrln int
+}
+
+func (e *encoder) flag(match bool) {
+	e.ctrl <<= 1
+	if match {
+		e.ctrl |= 1
+	}
+	e.ctrln++
+}
+
+func (e *encoder) flush() {
+	if e.ctrln == 0 {
+		return
+	}
+	e.ctrl <<= uint(8 - e.ctrln)
+	e.w.Write([]byte{e.ctrl})
+	e.w.Write(e.data)
+	e.data = e.data[0:0]
+	e.ctrl = 0
+	e.ctrln = 0
+}
+
+func (e *encoder) literal(b byte) {
+	e.flag(false)
+	e.data = append(e.data, b)
+	if e.ctrln == 8 {
+		e.flush()
+	}
+}
+
+func (e *encoder) match(l, o int) {
+	e.flag(true)
+
+	var lbits int
+	if l >= 15 {
+		lbits = 0x0f
+	} else {
+		lbits = l
+	}
+	e.data = append(e.data, uint8((lbits&0x0f<<4)|((o&0xf00)>>8)))
+	e.data = append(e.data, uint8(o&0x00ff))
+	if lbits == 0x0f {
+		e.data = append(e.data, uint8(l-0x0f))
+	}
+
+	if e.ctrln == 8 {
+		e.flush()
+	}
+}
+
 func Compress(buf []byte, w io.Writer, matcher Matcher) {
 	if len(buf) == 0 {
 		return
 	}
 
-	var ctrlbits uint8
-	var ctrln int
-
-	data := make([]byte, 4, 4096)
-
 	n := len(buf)
 
-	data[0] = uint8(n & 0xff)
-	data[1] = uint8(n >> 8 & 0xff)
-	data[2] = uint8(n >> 16 & 0xff)
-	data[3] = uint8(n >> 24 & 0xff)
+	w.Write([]byte{uint8(n & 0xff), uint8(n >> 8 & 0xff), uint8(n >> 16 & 0xff), uint8(n >> 24 & 0xff)})
 
-	w.Write(data)
-
-	data = data[0:0]
+	e := encoder{w: w, data: make([]byte, 0, 4096)}
 
 	fileoffs := 0
 
@@ -143,72 +188,26 @@ func Compress(buf []byte, w io.Writer, matcher Matcher) {
 		minoffs := max(fileoffs-4096, 0)
 		l, o := matcher.findMatch(fileoffs, buf[minoffs:fileoffs], buf[fileoffs:])
 
-		ctrlbits <<= 1
-		ctrln++
-
 		if l > 2 {
-
 			minoffs1 := max(1+fileoffs-4096, 0)
 			l1, o1 := matcher.findMatch(fileoffs+1, buf[minoffs1:fileoffs+1], buf[fileoffs+1:])
 
 			if l1 > l {
 				// found a better match if we pretend this char didn't match
-				// this code is basically the 'else' clause and the bottom/top of the loop
-				data = append(data, buf[fileoffs])
-
-				if ctrln == 8 {
-					// control word is full -- flush
-					w.Write([]byte{ctrlbits})
-					w.Write(data)
-					data = data[0:0]
-					ctrln = 0
-					ctrlbits = 0
-				}
+				e.literal(buf[fileoffs])
 				fileoffs++
-
-				ctrlbits <<= 1
-				ctrln++
 				l = l1
 				o = o1
 			}
 
-			// worth compressing
-			var lbits int
-			if l >= 15 {
-				lbits = 0x0f
-			} else {
-				lbits = l
-			}
-			b := uint8((lbits & 0x0f << 4) | ((o & 0xf00) >> 8))
-			data = append(data, b)
-			b = uint8(o & 0x00ff)
-			data = append(data, b)
-			if lbits == 0x0f {
-				b = uint8(l - 0x0f)
-				data = append(data, b)
-			}
-			ctrlbits |= 1
+			e.match(l, o)
 		} else {
 			l = 1
-			data = append(data, buf[fileoffs])
-		}
-
-		if ctrln == 8 {
-			// control word is full -- flush
-			w.Write([]byte{ctrlbits})
-			w.Write(data)
-			data = data[0:0]
-			ctrln = 0
-			ctrlbits = 0
+			e.literal(buf[fileoffs])
 		}
 
 		fileoffs += l
 	}
 
-	// flush any remaining data
-	if ctrln != 0 {
-		ctrlbits <<= uint(8 - ctrln)
-		w.Write([]byte{ctrlbits})
-		w.Write(data)
-	}
+	e.flush()
 }
