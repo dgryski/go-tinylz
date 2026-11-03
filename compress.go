@@ -1,5 +1,7 @@
 package tinylz
 
+import "encoding/binary"
+
 const (
 	defaultTableSize = 1 << 10
 	fnv1a            = 0x1000193
@@ -14,10 +16,6 @@ func CompressBound(n int) int {
 	return 4 + n + (n+7)/8
 }
 
-func loadUint32(buf []uint8) uint32 {
-	return uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16 | uint32(buf[3])<<24
-}
-
 func findMatch(table []uint32, fileoffs int, buf []uint8, s []uint8, min int) (length int, offs int) {
 	if len(s) < 4 {
 		return 0, 0
@@ -26,7 +24,7 @@ func findMatch(table []uint32, fileoffs int, buf []uint8, s []uint8, min int) (l
 	// the mask clears the low bit so h starts a pair of entries
 	mask := uint32(len(table) - 2)
 
-	h := ((loadUint32(s) * fnv1a) << 1) & mask
+	h := ((binary.LittleEndian.Uint32(s) * fnv1a) << 1) & mask
 
 	m1 := table[h]
 	m2 := table[h+1]
