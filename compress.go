@@ -18,7 +18,7 @@ func loadUint32(buf []uint8) uint32 {
 	return uint32(buf[0]) | uint32(buf[1])<<8 | uint32(buf[2])<<16 | uint32(buf[3])<<24
 }
 
-func findMatch(table []uint32, fileoffs int, buf []uint8, s []uint8) (length int, offs int) {
+func findMatch(table []uint32, fileoffs int, buf []uint8, s []uint8, min int) (length int, offs int) {
 	if len(s) < 4 {
 		return 0, 0
 	}
@@ -34,8 +34,8 @@ func findMatch(table []uint32, fileoffs int, buf []uint8, s []uint8) (length int
 	table[h] = table[h+1]
 	table[h+1] = uint32(fileoffs)
 
-	l1, o1 := checkMatch(fileoffs, int(m1), buf, s)
-	l2, o2 := checkMatch(fileoffs, int(m2), buf, s)
+	l1, o1 := checkMatch(fileoffs, int(m1), buf, s, min)
+	l2, o2 := checkMatch(fileoffs, int(m2), buf, s, min)
 
 	if l1 > l2 {
 		return l1, o1
@@ -44,7 +44,8 @@ func findMatch(table []uint32, fileoffs int, buf []uint8, s []uint8) (length int
 	return l2, o2
 }
 
-func checkMatch(fileoffs, offs int, buf, s []byte) (int, int) {
+// checkMatch may return 0 for a match no longer than min.
+func checkMatch(fileoffs, offs int, buf, s []byte, min int) (int, int) {
 	if offs == 0 || (fileoffs-offs) > window {
 		return 0, 0
 	}
@@ -59,6 +60,10 @@ func checkMatch(fileoffs, offs int, buf, s []byte) (int, int) {
 
 	match := buf[o:]
 
+	if min > 0 && (min >= len(s) || min >= len(match) || match[min] != s[min]) {
+		return 0, 0
+	}
+
 	var length int
 	for length < maxMatchLength && length < len(s) && length < len(match) && match[length] == s[length] {
 		length++
@@ -67,7 +72,7 @@ func checkMatch(fileoffs, offs int, buf, s []byte) (int, int) {
 	return length, o
 }
 
-func findBest(buf, s []uint8) (length int, offs int) {
+func findBest(buf, s []uint8, _ int) (length int, offs int) {
 	if len(s) == 0 {
 		return 0, 0
 	}
@@ -176,20 +181,20 @@ func Compress(dst, src []byte, table []uint32) (int, error) {
 		table[i] = 0
 	}
 
-	return compress(dst, src, func(fileoffs int, buf, s []byte) (int, int) {
-		return findMatch(table, fileoffs, buf, s)
+	return compress(dst, src, func(fileoffs int, buf, s []byte, min int) (int, int) {
+		return findMatch(table, fileoffs, buf, s, min)
 	})
 }
 
 // CompressBest searches the whole window for the longest match at every position.
 // It takes no table and is much slower than Compress.
 func CompressBest(dst, src []byte) (int, error) {
-	return compress(dst, src, func(_ int, buf, s []byte) (int, int) {
-		return findBest(buf, s)
+	return compress(dst, src, func(_ int, buf, s []byte, min int) (int, int) {
+		return findBest(buf, s, min)
 	})
 }
 
-func compress(dst, src []byte, find func(fileoffs int, buf, s []byte) (int, int)) (int, error) {
+func compress(dst, src []byte, find func(fileoffs int, buf, s []byte, min int) (int, int)) (int, error) {
 	n := len(src)
 	if n == 0 {
 		return 0, nil
@@ -210,11 +215,11 @@ func compress(dst, src []byte, find func(fileoffs int, buf, s []byte) (int, int)
 
 	for fileoffs < n && !e.full {
 		minoffs := max(fileoffs-window, 0)
-		l, o := find(fileoffs, src[minoffs:fileoffs], src[fileoffs:])
+		l, o := find(fileoffs, src[minoffs:fileoffs], src[fileoffs:], 0)
 
 		if l > 2 {
 			minoffs1 := max(1+fileoffs-window, 0)
-			l1, o1 := find(fileoffs+1, src[minoffs1:fileoffs+1], src[fileoffs+1:])
+			l1, o1 := find(fileoffs+1, src[minoffs1:fileoffs+1], src[fileoffs+1:], l)
 
 			if l1 > l {
 				// found a better match if we pretend this char didn't match
