@@ -1,6 +1,6 @@
 module github.com/dgryski/go-tinylz
 
-go 1.20
+go 1.21
 
 require (
 	github.com/dgryski/go-ddmin v0.0.0-20210904190556-96a6d69f1034

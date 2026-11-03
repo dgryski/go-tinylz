@@ -93,13 +93,6 @@ func findBest(buf, s []uint8) (length int, offs int) {
 	return length, offs
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 type encoder struct {
 	dst     []byte
 	n       int
